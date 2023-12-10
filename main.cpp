@@ -1,4 +1,5 @@
 #include "Polyweb/polyweb.hpp"
+#include <cstdlib>
 #include <fstream>
 #include <mutex>
 #include <queue>
@@ -36,7 +37,13 @@ int main(int argc, char* argv[]) {
                 ClientInfo* client_info = new ClientInfo;
                 conn.data = client_info;
                 mutex.lock();
-                client_info->current_job = queue.front();
+                if (!queue.empty()) {
+                    client_info->current_job = queue.front();
+                    queue.pop();
+                } else {
+                    std::cout << "Finished!" << std::endl;
+                    exit(0);
+                }
                 queue.pop();
                 mutex.unlock();
                 if (conn.send(pw::WSMessage(client_info->current_job)) == PN_ERROR) {
@@ -55,8 +62,13 @@ int main(int argc, char* argv[]) {
                 auto client_info = (ClientInfo*) conn.data;
                 responses_file << client_info->current_job << '\t' << message.to_string() << std::endl;
                 mutex.lock();
-                client_info->current_job = queue.front();
-                queue.pop();
+                if (!queue.empty()) {
+                    client_info->current_job = queue.front();
+                    queue.pop();
+                } else {
+                    std::cout << "Finished!" << std::endl;
+                    exit(0);
+                }
                 mutex.unlock();
                 if (conn.send(pw::WSMessage(client_info->current_job)) == PN_ERROR) {
                     conn.close();
