@@ -1,11 +1,8 @@
 #include "Polyweb/polyweb.hpp"
-#include "json.hpp"
 #include <fstream>
 #include <mutex>
 #include <queue>
 #include <string>
-
-using nlohmann::json;
 
 struct ClientInfo {
     std::string current_job;
