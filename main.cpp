@@ -60,7 +60,10 @@ int main(int argc, char* argv[]) {
                 }
 
                 auto client_info = (ClientInfo*) conn.data;
-                responses_file << client_info->current_job << '\t' << message.to_string() << std::endl;
+                std::string response = message.to_string();
+                if (response != "SKIP_PROMPT") {
+                    responses_file << client_info->current_job << '\t' << response << std::endl;
+                }
                 mutex.lock();
                 if (!queue.empty()) {
                     client_info->current_job = queue.front();
