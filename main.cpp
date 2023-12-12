@@ -69,7 +69,8 @@ int main(int argc, char* argv[]) {
                     }
 
                     // Check Proof of Work
-                    unsigned int hash[8];
+                    static_assert(sizeof(unsigned int) == 4, "unsigned int must be 4 bytes");
+                    unsigned int hash[SHA256_DIGEST_LENGTH / 4];
                     SHA256((const unsigned char*) message.data.data(), message.data.size(), (unsigned char*) hash);
 #if BYTE_ORDER == LITTLE_ENDIAN
                     if (hash[0] && __builtin_ctz(hash[0]) < 20) {
