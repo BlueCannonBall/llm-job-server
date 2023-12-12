@@ -10,7 +10,7 @@
 
 struct ClientInfo {
     std::string current_job;
-    time_t time;
+    time_t rawtime;
 };
 
 int main(int argc, char* argv[]) {
@@ -45,6 +45,7 @@ int main(int argc, char* argv[]) {
                 std::unique_lock<std::mutex> lock(mutex);
                 if (!queue.empty()) {
                     client_info->current_job = queue.front();
+                    client_info->rawtime = time(nullptr);
                     queue.pop();
                 } else {
                     std::cout << "Finished!" << std::endl;
@@ -81,8 +82,28 @@ int main(int argc, char* argv[]) {
                         return;
                     }
 
+                    auto client_info = (ClientInfo*) conn.data;
+
                     pw::QueryParameters query_parameters;
                     query_parameters.parse(message.to_string());
+
+                    pw::QueryParameters::map_type::const_iterator time_it;
+                    if ((time_it = query_parameters->find("time")) == query_parameters->end()) {
+                        conn.close();
+                        return;
+                    }
+
+                    time_t rawtime;
+                    try {
+                        rawtime = std::stoull(time_it->second);
+                    } catch (const std::exception& e) {
+                        conn.close();
+                        return;
+                    }
+                    if (rawtime < client_info->rawtime) {
+                        conn.close();
+                        return;
+                    }
 
                     pw::QueryParameters::map_type::const_iterator resp_it;
                     if ((resp_it = query_parameters->find("response")) == query_parameters->end()) {
@@ -90,7 +111,6 @@ int main(int argc, char* argv[]) {
                         return;
                     }
 
-                    auto client_info = (ClientInfo*) conn.data;
                     if (!resp_it->second.empty()) {
                         responses_file << client_info->current_job << '\t' << resp_it->second << std::endl;
                     }
@@ -98,6 +118,7 @@ int main(int argc, char* argv[]) {
                     std::unique_lock<std::mutex> lock(mutex);
                     if (!queue.empty()) {
                         client_info->current_job = queue.front();
+                        client_info->rawtime = time(nullptr);
                         queue.pop();
                     } else {
                         std::cout << "Finished!" << std::endl;
