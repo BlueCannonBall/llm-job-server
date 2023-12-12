@@ -1,12 +1,16 @@
 #include "Polyweb/polyweb.hpp"
+#include <cstdint>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <mutex>
+#include <openssl/sha.h>
 #include <queue>
 #include <string>
 
 struct ClientInfo {
     std::string current_job;
+    time_t time;
 };
 
 int main(int argc, char* argv[]) {
@@ -31,21 +35,25 @@ int main(int argc, char* argv[]) {
     pn::init();
     pn::UniqueSock<pw::Server> server;
 
-    server->route_ws("/",
+    server->route_ws(
+        "/",
         pw::WSRoute {
             [&mutex, &queue](pw::Connection& conn, void*) {
                 ClientInfo* client_info = new ClientInfo;
                 conn.data = client_info;
-                mutex.lock();
+
+                std::unique_lock<std::mutex> lock(mutex);
                 if (!queue.empty()) {
                     client_info->current_job = queue.front();
                     queue.pop();
                 } else {
                     std::cout << "Finished!" << std::endl;
+                    pn::quit();
                     exit(0);
                 }
                 queue.pop();
                 mutex.unlock();
+
                 if (conn.send(pw::WSMessage(client_info->current_job)) == PN_ERROR) {
                     conn.close();
                     return;
@@ -53,40 +61,65 @@ int main(int argc, char* argv[]) {
 
                 std::cout << "New client connected to job server" << std::endl;
             },
-            [&responses_file, &mutex, &queue](pw::Connection& conn, pw::WSMessage message, void*) {
-                if (message.opcode != 1 || message.data.empty()) {
-                    conn.close();
-                    return;
-                }
+                [&responses_file, &mutex, &queue](pw::Connection& conn, pw::WSMessage message, void*) {
+                    if (message.opcode != 1 || message.data.empty()) {
+                        conn.close();
+                        return;
+                    }
 
-                auto client_info = (ClientInfo*) conn.data;
-                std::string response = message.to_string();
-                if (response != "SKIP_PROMPT") {
-                    responses_file << client_info->current_job << '\t' << response << std::endl;
-                }
-                mutex.lock();
-                if (!queue.empty()) {
-                    client_info->current_job = queue.front();
-                    queue.pop();
-                } else {
-                    std::cout << "Finished!" << std::endl;
-                    exit(0);
-                }
-                mutex.unlock();
-                if (conn.send(pw::WSMessage(client_info->current_job)) == PN_ERROR) {
-                    conn.close();
-                    return;
-                }
-            },
-            [&mutex, &queue](pw::Connection& conn, uint16_t status_code, const std::string& reason, bool clean, void*) {
-                auto client_info = (ClientInfo*) conn.data;
-                mutex.lock();
-                queue.push(client_info->current_job);
-                mutex.unlock();
-                delete client_info;
+                    // Check Proof of Work
+                    unsigned int hash[8];
+                    SHA256((const unsigned char*) message.data.data(), message.data.size(), (unsigned char*) hash);
+#if BYTE_ORDER == LITTLE_ENDIAN
+                    if (hash[0] && __builtin_ctz(hash[0]) < 20) {
+#elif BYTE_ORDER == BIG_ENDIAN
+                    if (hash[0] && __builtin_clz(hash[0]) < 20) {
+#else
+    #error Unsupported byte order
+#endif
+                        conn.close();
+                        return;
+                    }
 
-                std::cout << "Client " << (clean ? "cleanly" : "uncleanly") << " disconnected from job server" << std::endl;
-            },
+                    pw::QueryParameters query_parameters;
+                    query_parameters.parse(message.to_string());
+
+                    pw::QueryParameters::map_type::const_iterator resp_it;
+                    if ((resp_it = query_parameters->find("response")) == query_parameters->end()) {
+                        conn.close();
+                        return;
+                    }
+
+                    auto client_info = (ClientInfo*) conn.data;
+                    if (!resp_it->second.empty()) {
+                        responses_file << client_info->current_job << '\t' << resp_it->second << std::endl;
+                    }
+
+                    std::unique_lock<std::mutex> lock(mutex);
+                    if (!queue.empty()) {
+                        client_info->current_job = queue.front();
+                        queue.pop();
+                    } else {
+                        std::cout << "Finished!" << std::endl;
+                        pn::quit();
+                        exit(0);
+                    }
+                    lock.unlock();
+
+                    if (conn.send(pw::WSMessage(client_info->current_job)) == PN_ERROR) {
+                        conn.close();
+                        return;
+                    }
+                },
+                [&mutex, &queue](pw::Connection& conn, uint16_t status_code, const std::string& reason, bool clean, void*) {
+                    auto client_info = (ClientInfo*) conn.data;
+                    mutex.lock();
+                    queue.push(client_info->current_job);
+                    mutex.unlock();
+                    delete client_info;
+
+                    std::cout << "Client " << (clean ? "cleanly" : "uncleanly") << " disconnected from job server" << std::endl;
+                },
         });
 
     if (server->bind("0.0.0.0", port) == PN_ERROR) {
