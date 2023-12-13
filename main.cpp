@@ -62,86 +62,80 @@ int main(int argc, char* argv[]) {
 
                 std::cout << "New client connected to job server" << std::endl;
             },
-                [&responses_file, &mutex, &queue](pw::Connection& conn, pw::WSMessage message, void*) {
-                    if (message.opcode != 1 || message.data.empty()) {
-                        conn.close();
-                        return;
-                    }
+            [&responses_file, &mutex, &queue](pw::Connection& conn, pw::WSMessage message, void*) {
+                if (message.opcode != 1 || message.data.empty()) {
+                    conn.close();
+                    return;
+                }
 
-                    // Check Proof of Work
-                    static_assert(sizeof(unsigned int) >= 4, "unsigned int must be 4 bytes");
-                    unsigned int hash[SHA256_DIGEST_LENGTH / sizeof(unsigned int)];
-                    SHA256((const unsigned char*) message.data.data(), message.data.size(), (unsigned char*) hash);
-#if BYTE_ORDER == LITTLE_ENDIAN
-                    if (hash[0] && __builtin_ctz(hash[0]) < 20) {
-#elif BYTE_ORDER == BIG_ENDIAN
-                    if (hash[0] && __builtin_clz(hash[0]) < 20) {
-#else
-    #error Unsupported byte order
-#endif
-                        conn.close();
-                        return;
-                    }
+                // Check proof of work
+                unsigned char digest[SHA256_DIGEST_LENGTH];
+                SHA256((const unsigned char*) message.data.data(), message.data.size(), digest);
+                int32_t first_32_bits = (((int32_t) digest[0]) << 16) | (((int32_t) digest[1]) << 8) | (int32_t) digest[2];
+                if (first_32_bits && __builtin_clzl(first_32_bits << 8) < 20) {
+                    conn.close();
+                    return;
+                }
 
-                    auto client_info = (ClientInfo*) conn.data;
+                auto client_info = (ClientInfo*) conn.data;
 
-                    pw::QueryParameters query_parameters;
-                    query_parameters.parse(message.to_string());
+                pw::QueryParameters query_parameters;
+                query_parameters.parse(message.to_string());
 
-                    pw::QueryParameters::map_type::const_iterator time_it;
-                    if ((time_it = query_parameters->find("time")) == query_parameters->end()) {
-                        conn.close();
-                        return;
-                    }
+                pw::QueryParameters::map_type::const_iterator time_it;
+                if ((time_it = query_parameters->find("time")) == query_parameters->end()) {
+                    conn.close();
+                    return;
+                }
 
-                    time_t rawtime;
-                    try {
-                        rawtime = std::stoull(time_it->second);
-                    } catch (const std::exception& e) {
-                        conn.close();
-                        return;
-                    }
-                    if (rawtime < client_info->rawtime) {
-                        conn.close();
-                        return;
-                    }
+                time_t rawtime;
+                try {
+                    rawtime = std::stoull(time_it->second);
+                } catch (const std::exception& e) {
+                    conn.close();
+                    return;
+                }
+                if (rawtime < client_info->rawtime) {
+                    conn.close();
+                    return;
+                }
 
-                    pw::QueryParameters::map_type::const_iterator resp_it;
-                    if ((resp_it = query_parameters->find("response")) == query_parameters->end()) {
-                        conn.close();
-                        return;
-                    }
+                pw::QueryParameters::map_type::const_iterator resp_it;
+                if ((resp_it = query_parameters->find("response")) == query_parameters->end()) {
+                    conn.close();
+                    return;
+                }
 
-                    if (!resp_it->second.empty()) {
-                        responses_file << client_info->current_job << '\t' << resp_it->second << std::endl;
-                    }
+                if (!resp_it->second.empty()) {
+                    responses_file << client_info->current_job << '\t' << resp_it->second << std::endl;
+                }
 
-                    std::unique_lock<std::mutex> lock(mutex);
-                    if (!queue.empty()) {
-                        client_info->current_job = queue.front();
-                        client_info->rawtime = time(nullptr);
-                        queue.pop();
-                    } else {
-                        std::cout << "Finished!" << std::endl;
-                        pn::quit();
-                        exit(0);
-                    }
-                    lock.unlock();
+                std::unique_lock<std::mutex> lock(mutex);
+                if (!queue.empty()) {
+                    client_info->current_job = queue.front();
+                    client_info->rawtime = time(nullptr);
+                    queue.pop();
+                } else {
+                    std::cout << "Finished!" << std::endl;
+                    pn::quit();
+                    exit(0);
+                }
+                lock.unlock();
 
-                    if (conn.send(pw::WSMessage(client_info->current_job)) == PN_ERROR) {
-                        conn.close();
-                        return;
-                    }
-                },
-                [&mutex, &queue](pw::Connection& conn, uint16_t status_code, const std::string& reason, bool clean, void*) {
-                    auto client_info = (ClientInfo*) conn.data;
-                    mutex.lock();
-                    queue.push(client_info->current_job);
-                    mutex.unlock();
-                    delete client_info;
+                if (conn.send(pw::WSMessage(client_info->current_job)) == PN_ERROR) {
+                    conn.close();
+                    return;
+                }
+            },
+            [&mutex, &queue](pw::Connection& conn, uint16_t status_code, const std::string& reason, bool clean, void*) {
+                auto client_info = (ClientInfo*) conn.data;
+                mutex.lock();
+                queue.push(client_info->current_job);
+                mutex.unlock();
+                delete client_info;
 
-                    std::cout << "Client " << (clean ? "cleanly" : "uncleanly") << " disconnected from job server" << std::endl;
-                },
+                std::cout << "Client " << (clean ? "cleanly" : "uncleanly") << " disconnected from job server" << std::endl;
+            },
         });
 
     if (server->bind("0.0.0.0", port) == PN_ERROR) {
