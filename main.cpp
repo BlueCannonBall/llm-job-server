@@ -71,7 +71,7 @@ int main(int argc, char* argv[]) {
                 // Check proof of work
                 unsigned char digest[SHA256_DIGEST_LENGTH];
                 SHA256((const unsigned char*) message.data.data(), message.data.size(), digest);
-                int32_t first_32_bits = (((int32_t) digest[0]) << 16) | (((int32_t) digest[1]) << 8) | digest[2];
+                uint32_t first_32_bits = (((uint32_t) digest[0]) << 16) | (((uint32_t) digest[1]) << 8) | digest[2];
                 if (first_32_bits && __builtin_clzl(first_32_bits << 8) < 20) {
                     conn.close();
                     return;
