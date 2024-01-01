@@ -228,7 +228,7 @@ int main(int argc, char* argv[]) {
                         return a.second > b.second;
                     });
                     for (const auto& contributor : contributor_pairs) {
-                        html << "<li>" << pw::escape_xml(contributor.first) << " - " << contributor.second << " translation(s)</li>";
+                        html << "<li>" << pw::escape_xml(contributor.first) << " - " << contributor.second << " contribution(s)</li>";
                     }
                     html << "</ol>";
                 }
