@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -17,26 +18,26 @@ const time_t running_since = time(nullptr);
 
 std::string sockaddr_to_string(const struct sockaddr* addr) {
     std::string ret;
-
     switch (addr->sa_family) {
     case AF_INET: {
-        auto inet_addr = (const struct sockaddr_in*) addr;
-        pn::inet_ntop(AF_INET, &inet_addr->sin_addr, ret);
-        ret += ':' + std::to_string(ntohs(inet_addr->sin_port));
+        struct sockaddr_in inet_addr;
+        memcpy(&inet_addr, addr, sizeof inet_addr);
+        pn::inet_ntop(AF_INET, &inet_addr.sin_addr, ret);
+        ret += ':' + std::to_string(ntohs(inet_addr.sin_port));
         break;
     }
 
     case AF_INET6: {
-        auto inet6_addr = (const struct sockaddr_in6*) addr;
-        pn::inet_ntop(AF_INET6, &inet6_addr->sin6_addr, ret);
-        ret += ':' + std::to_string(ntohs(inet6_addr->sin6_port));
+        struct sockaddr_in6 inet6_addr;
+        memcpy(&inet6_addr, addr, sizeof inet6_addr);
+        pn::inet_ntop(AF_INET6, &inet6_addr.sin6_addr, ret);
+        ret += ':' + std::to_string(ntohs(inet6_addr.sin6_port));
         break;
     }
 
     default:
-        return "Unknown AF";
+        return "Unknown address family";
     }
-
     return ret;
 }
 
