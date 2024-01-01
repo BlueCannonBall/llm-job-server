@@ -1,12 +1,44 @@
 #include "Polyweb/polyweb.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <iomanip>
+#include <map>
 #include <mutex>
 #include <openssl/sha.h>
 #include <queue>
+#include <sstream>
 #include <string>
+#include <unordered_map>
+
+const time_t running_since = time(nullptr);
+
+std::string sockaddr_to_string(const struct sockaddr* addr) {
+    std::string ret;
+
+    switch (addr->sa_family) {
+    case AF_INET: {
+        auto inet_addr = (const struct sockaddr_in*) addr;
+        pn::inet_ntop(AF_INET, &inet_addr->sin_addr, ret);
+        ret += ':' + std::to_string(inet_addr->sin_port);
+        break;
+    }
+
+    case AF_INET6: {
+        auto inet6_addr = (const struct sockaddr_in6*) addr;
+        pn::inet_ntop(AF_INET6, &inet6_addr->sin6_addr, ret);
+        ret += ':' + std::to_string(inet6_addr->sin6_port);
+        break;
+    }
+
+    default:
+        return "Unknown AF";
+    }
+
+    return ret;
+}
 
 struct ClientInfo {
     std::string current_job;
@@ -28,8 +60,11 @@ int main(int argc, char* argv[]) {
     }
 
     std::mutex mutex;
+    std::unordered_map<std::string, unsigned long long> contributors;
+    std::map<std::string, unsigned long long> activity;
     std::queue<std::string> queue;
     for (std::string line; std::getline(prompts_file, line); queue.push(std::move(line))) {}
+    size_t initial_queue_size = queue.size();
     prompts_file.close();
 
     pn::init();
@@ -38,12 +73,13 @@ int main(int argc, char* argv[]) {
     server->route_ws(
         "/",
         pw::WSRoute {
-            [&mutex, &queue](pw::Connection& conn, void*) {
+            [&mutex, &contributors, &queue](pw::Connection& conn, void*) {
                 ClientInfo* client_info = new ClientInfo;
                 conn.data = client_info;
 
                 std::unique_lock<std::mutex> lock(mutex);
                 if (!queue.empty()) {
+                    contributors[sockaddr_to_string(&conn.addr)] = 0;
                     client_info->current_job = queue.front();
                     client_info->rawtime = time(nullptr);
                     queue.pop();
@@ -62,7 +98,7 @@ int main(int argc, char* argv[]) {
 
                 std::cout << "New client connected to job server" << std::endl;
             },
-            [&responses_file, &mutex, &queue](pw::Connection& conn, pw::WSMessage message, void*) {
+            [&responses_file, &mutex, &contributors, &activity, &queue](pw::Connection& conn, pw::WSMessage message, void*) {
                 if (message.opcode != 1 || message.data.empty()) {
                     conn.close();
                     return;
@@ -112,6 +148,28 @@ int main(int argc, char* argv[]) {
 
                 std::unique_lock<std::mutex> lock(mutex);
                 if (!queue.empty()) {
+                    ++contributors[sockaddr_to_string(&conn.addr)];
+
+#ifdef _WIN32
+                    struct tm timeinfo = *localtime(&rawtime);
+#else
+                    time_t rawtime = time(nullptr);
+                    struct tm timeinfo;
+                    localtime_r(&rawtime, &timeinfo);
+#endif
+                    std::ostringstream ss;
+                    ss.imbue(std::locale("C"));
+                    ss << std::put_time(&timeinfo, "%m/%d/%y");
+                    decltype(activity)::iterator day_it;
+                    if ((day_it = activity.find(ss.str())) != activity.end()) {
+                        ++day_it->second;
+                    } else {
+                        if (activity.size() >= 180) {
+                            activity.clear();
+                        }
+                        activity[ss.str()] = 1;
+                    }
+
                     client_info->current_job = queue.front();
                     client_info->rawtime = time(nullptr);
                     queue.pop();
@@ -127,14 +185,107 @@ int main(int argc, char* argv[]) {
                     return;
                 }
             },
-            [&mutex, &queue](pw::Connection& conn, uint16_t status_code, const std::string& reason, bool clean, void*) {
+            [&mutex, &contributors, &queue](pw::Connection& conn, uint16_t status_code, const std::string& reason, bool clean, void*) {
                 auto client_info = (ClientInfo*) conn.data;
                 mutex.lock();
                 queue.push(client_info->current_job);
+                contributors.erase(sockaddr_to_string(&conn.addr));
                 mutex.unlock();
                 delete client_info;
 
                 std::cout << "Client " << (clean ? "cleanly" : "uncleanly") << " disconnected from job server" << std::endl;
+            },
+        });
+
+    server->route("/stats",
+        pw::HTTPRoute {
+            [&mutex, &contributors, &activity, &queue, &initial_queue_size](const pw::Connection&, const pw::HTTPRequest& req, void*) {
+                std::lock_guard<std::mutex> lock(mutex);
+                std::ostringstream html;
+                html.imbue(std::locale("en_US.UTF-8"));
+                html << std::fixed << std::setprecision(3);
+                html << "<html>";
+                html << "<head>";
+                html << "<title>Contribution Statistics</title>";
+                html << "<style>html { margin: 0; padding: 0; } body { margin: 0; padding: 10px; font-family: sans-serif; color: rgb(204, 204, 204); background-color: rgb(17, 17, 17); } h1, h2, h3, h4, h5, h6 { color: #FFFFFF; } a { color: #4287F5; }</style>";
+                html << "</head>";
+
+                html << "<body style=\"display: flex; flex-direction: column; box-sizing: border-box; height: 100%;\">";
+                html << "<h1 style=\"margin: 5px; text-align: center;\">Contribution Statistics</h1>";
+
+                html << "<div style=\"display: flex; flex: 1; min-height: 0;\">";
+                html << "<div style=\"flex: 1; min-width: 0; margin: 10px; overflow-y: auto;\"/>";
+                html << "<p><strong>Running since:</strong> " << pw::build_date(running_since) << "</p>";
+                html << "<p><strong>Queue size:</strong> " << queue.size() << '/' << initial_queue_size << "</p>";
+
+                html << "<p><strong>Unique contributors:</strong> " << contributors.size() << "</p>";
+                if (!contributors.empty()) {
+                    html << "<p><strong>Most active contributors:</strong></p>";
+                    html << "<ol>";
+                    std::vector<std::pair<std::string, unsigned long long>> contributor_pairs(contributors.begin(), contributors.end());
+                    std::sort(contributor_pairs.begin(), contributor_pairs.end(), [](const auto& a, const auto& b) {
+                        return a.second > b.second;
+                    });
+                    for (const auto& contributor : contributor_pairs) {
+                        html << "<li>" << pw::escape_xml(contributor.first) << " - " << contributor.second << " translation(s)</li>";
+                    }
+                    html << "</ol>";
+                }
+                html << "</div>";
+
+                html << "<div style=\"flex: 1; min-width: 0; margin: 10px; padding: 10px; background-color: rgb(34, 34, 34); border-radius: 10px;\"><canvas id=\"chart\"></canvas></div>";
+                html << "</div>";
+
+                html << "<script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>";
+                html << "<script>";
+                html << "const labels = [";
+                for (const auto& day : activity) {
+                    html << std::quoted(day.first) << ',';
+                }
+                html << "];";
+                html << "const data = [";
+                for (const auto& day : activity) {
+                    html << std::to_string(day.second) << ',';
+                }
+                html << "];";
+                html << R"delimiter(
+                    const ctx = document.getElementById("chart");
+
+                    Chart.defaults.color = "rgb(204, 204, 204)";
+                    new Chart(ctx, {
+                        type: "bar",
+                        data: {
+                            labels,
+                            datasets: [{
+                                label: "# of Contributions",
+                                backgroundColor: "#FF4545",
+                                data,
+                                borderWidth: 1,
+                            }],
+                        },
+                        options: {
+                            maintainAspectRatio: false,
+                            scales: {
+                                x: {
+                                    grid: {
+                                        color: "rgb(85, 85, 85)",
+                                    },
+                                },
+                                y: {
+                                    beginAtZero: true,
+                                    grid: {
+                                        color: "rgb(85, 85, 85)",
+                                    },
+                                },
+                            },
+                        },
+                    });
+                )delimiter";
+                html << "</script>";
+
+                html << "</body>";
+                html << "</html>";
+                return pw::HTTPResponse(200, html.str(), {{"Content-Type", "text/html"}});
             },
         });
 
