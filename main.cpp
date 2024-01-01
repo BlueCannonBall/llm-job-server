@@ -22,14 +22,14 @@ std::string sockaddr_to_string(const struct sockaddr* addr) {
     case AF_INET: {
         auto inet_addr = (const struct sockaddr_in*) addr;
         pn::inet_ntop(AF_INET, &inet_addr->sin_addr, ret);
-        ret += ':' + std::to_string(inet_addr->sin_port);
+        ret += ':' + std::to_string(ntohs(inet_addr->sin_port));
         break;
     }
 
     case AF_INET6: {
         auto inet6_addr = (const struct sockaddr_in6*) addr;
         pn::inet_ntop(AF_INET6, &inet6_addr->sin6_addr, ret);
-        ret += ':' + std::to_string(inet6_addr->sin6_port);
+        ret += ':' + std::to_string(ntohs(inet6_addr->sin6_port));
         break;
     }
 
@@ -50,10 +50,10 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: Too few arguments" << std::endl;
         return 1;
     }
-    std::string port = argc >= 4 ? argv[3] : "8000";
+    std::string port = argc >= 4 ? argv[3] : "3000";
 
     std::ifstream prompts_file(argv[1]);
-    std::ofstream responses_file(argv[2]);
+    std::ofstream responses_file(argv[2], std::ostream::app);
     if (!prompts_file.is_open() || !responses_file.is_open()) {
         std::cerr << "Error: Could not open file" << std::endl;
         return 1;
