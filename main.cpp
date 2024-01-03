@@ -1,5 +1,6 @@
 #include "Polyweb/polyweb.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -61,11 +62,10 @@ int main(int argc, char* argv[]) {
     }
 
     std::mutex mutex;
-    std::unordered_map<std::string, unsigned long long> contributors;
-    std::map<std::string, unsigned long long> activity;
+    std::unordered_map<std::string, size_t> contributors;
+    std::map<std::string, size_t> activity;
     std::queue<std::string> queue;
     for (std::string line; std::getline(prompts_file, line); queue.push(std::move(line))) {}
-    size_t initial_queue_size = queue.size();
     prompts_file.close();
 
     pn::init();
@@ -200,7 +200,7 @@ int main(int argc, char* argv[]) {
 
     server->route("/stats",
         pw::HTTPRoute {
-            [&mutex, &contributors, &activity, &queue, &initial_queue_size](const pw::Connection&, const pw::HTTPRequest& req, void*) {
+            [&mutex, &contributors, &activity, &queue, initial_queue_size = queue.size()](const pw::Connection&, const pw::HTTPRequest& req, void*) {
                 std::lock_guard<std::mutex> lock(mutex);
                 std::ostringstream html;
                 html.imbue(std::locale("en_US.UTF-8"));
@@ -218,12 +218,13 @@ int main(int argc, char* argv[]) {
                 html << "<div style=\"flex: 1; min-width: 0; margin: 10px; overflow-y: auto;\"/>";
                 html << "<p><strong>Running since:</strong> " << pw::build_date(running_since) << "</p>";
                 html << "<p><strong>Queue size:</strong> " << queue.size() << '/' << initial_queue_size << "</p>";
+                html << "<p><strong>Contributions per minute:</strong> " << (initial_queue_size - queue.size()) / ((time(nullptr) - running_since) / 60.f) << "</p>";
 
                 html << "<p><strong>Unique contributors:</strong> " << contributors.size() << "</p>";
                 if (!contributors.empty()) {
                     html << "<p><strong>Most active contributors:</strong></p>";
                     html << "<ol>";
-                    std::vector<std::pair<std::string, unsigned long long>> contributor_pairs(contributors.begin(), contributors.end());
+                    std::vector<std::pair<std::string, size_t>> contributor_pairs(contributors.begin(), contributors.end());
                     std::sort(contributor_pairs.begin(), contributor_pairs.end(), [](const auto& a, const auto& b) {
                         return a.second > b.second;
                     });
@@ -259,7 +260,7 @@ int main(int argc, char* argv[]) {
                             labels,
                             datasets: [{
                                 label: "# of Contributions",
-                                backgroundColor: "#FF4545",
+                                backgroundColor: "#0EA5E9",
                                 data,
                                 borderWidth: 1,
                             }],
