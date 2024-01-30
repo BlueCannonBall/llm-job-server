@@ -66,8 +66,3 @@ clean:
 	@echo -e '\033[1m[POLYBUILD]\033[0m Finished deleting server and obj!'
 .PHONY: clean
 
-install:
-	@echo -e '\033[1m[POLYBUILD]\033[0m Copying server to /usr/local/bin...'
-	@cp server /usr/local/bin
-	@echo -e '\033[1m[POLYBUILD]\033[0m Finished copying server to /usr/local/bin!'
-.PHONY: install
