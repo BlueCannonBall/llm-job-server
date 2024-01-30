@@ -69,7 +69,7 @@ int main(int argc, char* argv[]) {
     prompts_file.close();
 
     pn::init();
-    pn::UniqueSock<pw::Server> server;
+    pn::UniqueSocket<pw::Server> server;
 
     server->route_ws(
         "/",
