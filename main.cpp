@@ -71,6 +71,34 @@ int main(int argc, char* argv[]) {
     pn::init();
     pn::UniqueSocket<pw::Server> server;
 
+#ifdef _WIN32
+    DWORD send_timeout = 300000;
+    DWORD recv_timeout = 300000;
+#else
+    struct timeval send_timeout {
+        .tv_sec = 0,
+        .tv_usec = 300000,
+    };
+    struct timeval recv_timeout {
+        .tv_sec = 0,
+        .tv_usec = 300000000,
+    };
+#endif
+    if (server->setsockopt(SOL_SOCKET, SO_SNDTIMEO, &send_timeout, sizeof send_timeout) == PN_ERROR) {
+        std::cerr << "Error: " << pn::universal_strerror() << std::endl;
+        return 1;
+    }
+    if (server->setsockopt(SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof recv_timeout) == PN_ERROR) {
+        std::cerr << "Error: " << pn::universal_strerror() << std::endl;
+        return 1;
+    }
+
+    int tcp_keep_alive = 1;
+    if (server->setsockopt(SOL_SOCKET, SO_KEEPALIVE, &tcp_keep_alive, sizeof(int)) == PN_ERROR) {
+        std::cerr << "Error: " << pn::universal_strerror() << std::endl;
+        return 1;
+    }
+
     server->route_ws(
         "/",
         pw::WSRoute {
