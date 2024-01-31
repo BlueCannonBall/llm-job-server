@@ -65,4 +65,3 @@ clean:
 	@rm -rf server obj
 	@printf '\033[1m[POLYBUILD]\033[0m Finished deleting server and obj!\n'
 .PHONY: clean
-
