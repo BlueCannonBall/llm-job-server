@@ -42,6 +42,40 @@ std::string sockaddr_to_string(const struct sockaddr* addr) {
     return ret;
 }
 
+int configure_socket(pn::Socket& socket, std::chrono::milliseconds timeout_duration, int tcp_keep_alive) {
+#ifdef _WIN32
+    DWORD timeout = timeout_duration.count();
+#else
+    struct timeval timeout;
+    timeout.tv_sec = timeout_duration.count() / 1000;
+    timeout.tv_usec = (timeout_duration.count() % 1000) * 1000;
+#endif
+    if (socket.setsockopt(SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout) == PN_ERROR) {
+        return PN_ERROR;
+    }
+    if (socket.setsockopt(SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout) == PN_ERROR) {
+        return PN_ERROR;
+    }
+    if (socket.setsockopt(SOL_SOCKET, SO_KEEPALIVE, &tcp_keep_alive, sizeof(int)) == PN_ERROR) {
+        return PN_ERROR;
+    }
+    return PN_OK;
+}
+
+std::string get_day() {
+#ifdef _WIN32
+    struct tm timeinfo = *localtime(&rawtime);
+#else
+    time_t rawtime = time(nullptr);
+    struct tm timeinfo;
+    localtime_r(&rawtime, &timeinfo);
+#endif
+    std::ostringstream ss;
+    ss.imbue(std::locale("C"));
+    ss << std::put_time(&timeinfo, "%m/%d/%y");
+    return ss.str();
+}
+
 struct ClientInfo {
     std::string current_job;
     time_t rawtime;
@@ -71,28 +105,6 @@ int main(int argc, char* argv[]) {
     pn::init();
     pn::UniqueSocket<pw::Server> server;
 
-#ifdef _WIN32
-    DWORD timeout = 300000;
-#else
-    struct timeval timeout;
-    timeout.tv_sec = 300;
-    timeout.tv_usec = 0;
-#endif
-    if (server->setsockopt(SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout) == PN_ERROR) {
-        std::cerr << "Error: " << pn::universal_strerror() << std::endl;
-        return 1;
-    }
-    if (server->setsockopt(SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout) == PN_ERROR) {
-        std::cerr << "Error: " << pn::universal_strerror() << std::endl;
-        return 1;
-    }
-
-    static constexpr int tcp_keep_alive = 1;
-    if (server->setsockopt(SOL_SOCKET, SO_KEEPALIVE, &tcp_keep_alive, sizeof(int)) == PN_ERROR) {
-        std::cerr << "Error: " << pn::universal_strerror() << std::endl;
-        return 1;
-    }
-
     server->route_ws(
         "/",
         pw::WSRoute {
@@ -113,6 +125,11 @@ int main(int argc, char* argv[]) {
                 }
                 queue.pop();
                 mutex.unlock();
+
+                if (configure_socket(conn, std::chrono::minutes(15), 1) == PN_ERROR) {
+                    conn.close();
+                    return;
+                }
 
                 if (conn.send(pw::WSMessage(client_info->current_job)) == PN_ERROR) {
                     conn.close();
@@ -173,24 +190,15 @@ int main(int argc, char* argv[]) {
                 if (!queue.empty()) {
                     ++contributors[sockaddr_to_string(&conn.addr)];
 
-#ifdef _WIN32
-                    struct tm timeinfo = *localtime(&rawtime);
-#else
-                    time_t rawtime = time(nullptr);
-                    struct tm timeinfo;
-                    localtime_r(&rawtime, &timeinfo);
-#endif
-                    std::ostringstream ss;
-                    ss.imbue(std::locale("C"));
-                    ss << std::put_time(&timeinfo, "%m/%d/%y");
                     decltype(activity)::iterator day_it;
-                    if ((day_it = activity.find(ss.str())) != activity.end()) {
+                    std::string day = get_day();
+                    if ((day_it = activity.find(day)) != activity.end()) {
                         ++day_it->second;
                     } else {
                         if (activity.size() >= 180) {
                             activity.clear();
                         }
-                        activity[ss.str()] = 1;
+                        activity[day] = 1;
                     }
 
                     client_info->current_job = queue.front();
