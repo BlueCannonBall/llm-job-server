@@ -17,6 +17,22 @@
 
 const time_t running_since = time(nullptr);
 
+struct ClientInfo {
+    std::string current_job;
+    time_t rawtime;
+};
+
+class CommaNumpunct : public std::numpunct<char> {
+protected:
+    char do_thousands_sep() const override {
+        return ',';
+    }
+
+    std::string do_grouping() const override {
+        return "\03";
+    }
+};
+
 std::string sockaddr_to_string(const struct sockaddr* addr) {
     std::string ret;
     switch (addr->sa_family) {
@@ -75,11 +91,6 @@ std::string get_day() {
     ss << std::put_time(&timeinfo, "%m/%d/%y");
     return ss.str();
 }
-
-struct ClientInfo {
-    std::string current_job;
-    time_t rawtime;
-};
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
@@ -233,7 +244,7 @@ int main(int argc, char* argv[]) {
             [&mutex, &contributors, &activity, &queue, initial_queue_size = queue.size()](const pw::Connection&, const pw::HTTPRequest& req, void*) {
                 std::lock_guard<std::mutex> lock(mutex);
                 std::ostringstream html;
-                html.imbue(std::locale("en_US.UTF-8"));
+                html.imbue(std::locale(std::locale(), new CommaNumpunct));
                 html << std::fixed << std::setprecision(3);
                 html << "<html>";
                 html << "<head>";
