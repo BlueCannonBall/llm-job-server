@@ -78,7 +78,7 @@ int configure_socket(pn::Socket& socket, std::chrono::milliseconds timeout_durat
     return PN_OK;
 }
 
-std::string get_day() {
+std::string get_date() {
 #ifdef _WIN32
     struct tm timeinfo = *localtime(&rawtime);
 #else
@@ -201,15 +201,15 @@ int main(int argc, char* argv[]) {
                 if (!queue.empty()) {
                     ++contributors[sockaddr_to_string(&conn.addr)];
 
-                    decltype(activity)::iterator day_it;
-                    std::string day = get_day();
-                    if ((day_it = activity.find(day)) != activity.end()) {
-                        ++day_it->second;
+                    decltype(activity)::iterator date_it;
+                    std::string date = get_date();
+                    if ((date_it = activity.find(date)) != activity.end()) {
+                        ++date_it->second;
                     } else {
                         if (activity.size() >= 180) {
                             activity.clear();
                         }
-                        activity[day] = 1;
+                        activity[date] = 1;
                     }
 
                     client_info->current_job = queue.front();
@@ -282,13 +282,13 @@ int main(int argc, char* argv[]) {
                 html << "<script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>";
                 html << "<script>";
                 html << "const labels = [";
-                for (const auto& day : activity) {
-                    html << std::quoted(day.first) << ',';
+                for (const auto& date : activity) {
+                    html << std::quoted(date.first) << ',';
                 }
                 html << "];";
                 html << "const data = [";
-                for (const auto& day : activity) {
-                    html << std::to_string(day.second) << ',';
+                for (const auto& date : activity) {
+                    html << std::to_string(date.second) << ',';
                 }
                 html << "];";
                 html << R"delimiter(
